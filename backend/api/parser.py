@@ -6,6 +6,7 @@ from nltk.tokenize import sent_tokenize
 import re
 import unicodedata
 import spacy
+from decouple import config
 
 nltk.download('punkt')
 nltk.download('averaged_perceptron_tagger')
@@ -80,9 +81,13 @@ def getArticleInfo(page_content):
   image_html = page_content.findAll('img', class_ = 'SingleImage-image Article-thumbnail wp-post-image')[0]
   image = image_html.get("src")
 
-  return title, author, date, image
+  subtitle = header.find('p', class_='Article-excerpt').get_text()
 
+  return title, subtitle, author, date, image
 
+def getArticlePublisher(page_content):
+  publisher = page_content.find('img', class_='header__logo')
+  return publisher.get("alt")
 
 
 def getNamedEntities(processed_text):
@@ -117,4 +122,67 @@ def attribute_quote(people, quotes):
         Quotes.append((p[0],q))
   return Quotes
 
-#def createEntity():
+
+
+def getTwitterInfo(name):
+  
+  key = 'Bearer ' + config("BEARER")
+  headers = {
+      'Authorization': key,
+  }
+  querystring = {"q": name,"page":"1","count":"1"}
+  url = "https://api.twitter.com/1.1/users/search.json"
+
+  response = requests.request("GET", url, headers=headers, params=querystring)
+  data = response.json()[0]
+  
+  is_verified = data['verified']
+  screen_name = data['screen_name']
+  user_name = data['name']
+  profile_img = data['profile_image_url']
+
+  return is_verified, screen_name, user_name, profile_img
+
+def getImage(name):
+  #Important note!: daily limit is 100 requests
+  #used today so far: 2
+  url = "https://contextualwebsearch-websearch-v1.p.rapidapi.com/api/Search/ImageSearchAPI"
+
+  querystring = {"q": name,"pageNumber":"1","pageSize":"1","autoCorrect":"true"}
+
+  headers = {
+    "X-RapidAPI-Key": config("X_RAPID_KEY"),
+    "X-RapidAPI-Host": config("X_RAPID_HOST")
+  }
+
+  response = requests.request("GET", url, headers=headers, params=querystring)
+  return response.json()['value'][0]['url']
+
+
+def createEntity(name, userName, screenName, profileImg):
+  return {'name': name, 'userName': userName, 'screenName': screenName, 'profileImg': profileImg}
+
+def createQuote(name, quote):
+  is_verified, screen_name, user_name, profile_img = getTwitterInfo(name)
+  author = createEntity(name, user_name, screen_name, profile_img)
+  return {'author': author, 'text': quote}
+  
+def generateEntitiesList(people):
+  entities = []
+  for p in people:
+    is_verified, screen_name, user_name, profile_img = getTwitterInfo(p)
+    entities.append(createEntity(p, user_name, screen_name, profile_img))
+  return entities
+
+def quoteToSection(sections, summarized_sections, quotes):
+  SectionList = []
+  i = 0
+  for s in sections:
+    Section={}
+    Section['text'] = summarized_sections[i]
+    Section['quotes'] = []
+    for q in quotes:
+      if(q['text'] in s):
+        Section['quotes'].append(q)
+    SectionList.append(Section)
+  return SectionList
